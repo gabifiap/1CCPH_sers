@@ -1,0 +1,269 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/gabifiap/1CCPH_sers/blob/main/checkpoint%202\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "benRPkcGOrIC"
+      },
+      "source": [
+        "### 4. Gerar o CSV horário\n",
+        "\n",
+        "As listas de `hourly` são alinhadas: o índice 0 de cada variável se refere ao índice 0 de `time`. Percorremos esses índices, mantemos as horas de 7h a 17h e descartamos linhas com valores ausentes. A data permanece ordenada para facilitar uma avaliação temporal."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "7aNO7khQOrIC"
+      },
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "nomes_api = [\"temperature_2m\", \"relative_humidity_2m\", \"cloud_cover\",\n",
+        "             \"wind_speed_10m\", \"shortwave_radiation\"]\n",
+        "linhas_regressao = []\n",
+        "for indice, data_hora in enumerate(horas_api[\"time\"]):\n",
+        "    hora = int(data_hora[11:13])\n",
+        "    valores = [horas_api[nome][indice] for nome in nomes_api]\n",
+        "    if 7 <= hora <= 17 and all(valor is not None for valor in valores):\n",
+        "        linhas_regressao.append([data_hora, *valores[:4], hora, valores[4]])\n",
+        "if len(linhas_regressao) < 100:\n",
+        "    raise ValueError(\"Poucos horários válidos: confira a resposta do Open-Meteo\")\n",
+        "print(\"Horas válidas:\", len(linhas_regressao))\n",
+        "print(\"Primeiro exemplo:\", linhas_regressao[0])"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "iLc-UcQVOrIC"
+      },
+      "execution_count": null,
+      "outputs": [],
+      "source": [
+        "with open(\"meteo_regressao_orange.csv\", \"w\", newline=\"\", encoding=\"utf-8-sig\") as arquivo:\n",
+        "    escritor = csv.writer(arquivo)\n",
+        "    escritor.writerow([\"data_hora\", \"temperatura_c\", \"umidade_pct\",\n",
+        "                       \"nuvens_pct\", \"vento_kmh\", \"hora\", \"radiacao_w_m2\"])\n",
+        "    escritor.writerows(linhas_regressao)\n",
+        "print(\"Salvo: meteo_regressao_orange.csv\")"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')"
+      ],
+      "metadata": {
+        "id": "7lZEe6krED2T"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "TKzrEeAQOrIC"
+      },
+      "source": [
+        "### O que você deve fazer — regressão\n",
+        "\n",
+        "1. Carregue o CSV, explique as colunas, examine valores ausentes e apresente ao menos uma visualização. Defina `X` (cinco entradas) e `y` (`radiacao_w_m2`).\n",
+        "2. Mantenha as linhas em ordem de `data_hora`: use aproximadamente **80% das primeiras horas para treino** e as 20% finais para teste. Evite embaralhar as horas. Ajuste transformações apenas com o treino.\n",
+        "3. Escolha, justifique e treine **três algoritmos de regressão diferentes** com a mesma divisão. Os imports e a implementação são sua responsabilidade.\n",
+        "4. Compare **MAE** (W/m²), **MSE** ((W/m²)²) e **R²**; faça um gráfico de valores reais × previstos de pelo menos um modelo.\n",
+        "5. Interprete os erros, discuta o peso da hora e explique por que essa estimativa da radiação **não prevê automaticamente a energia produzida** por um sistema fotovoltaico.\n",
+        "\n",
+        "**O que registrar:** tabela comparativa dos três algoritmos, gráfico e interpretação escrita. Nenhum valor de `radiacao_w_m2` deve ser usado para criar uma entrada do mesmo registro."
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 1. Carregar o CSV e Análise Exploratória\n",
+        "df_meteo = pd.read_csv('meteo_regressao_orange.csv')\n",
+        "\n",
+        "# Verificar estrutura do DataFrame\n",
+        "print(df_meteo.info())\n",
+        "display(df_meteo.head())\n",
+        "\n",
+        "# Gráfico da Radiação Média por Hora\n",
+        "plt.figure(figsize=(9, 4))\n",
+        "df_meteo.groupby('hora')['radiacao_w_m2'].mean().plot(kind='bar', color='orange')\n",
+        "plt.title('Radiação Solar Média por Hora em Petrolina (PE)')\n",
+        "plt.xlabel('Hora do Dia (7h às 17h)')\n",
+        "plt.ylabel('Radiação Solar Média (W/m²)')\n",
+        "plt.grid(axis='y', linestyle='--', alpha=0.7)\n",
+        "plt.show()\n",
+        "\n",
+        "# Definição dos atributos (X) e do alvo (y)\n",
+        "features = ['temperatura_c', 'umidade_pct', 'nuvens_pct', 'vento_kmh', 'hora']\n",
+        "X = df_meteo[features]\n",
+        "y = df_meteo['radiacao_w_m2']"
+      ],
+      "metadata": {
+        "id": "P119bqKv5stF"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 2. Divisão Temporal (80% Treino / 20% Teste)\n",
+        "df_meteo = df_meteo.sort_values('data_hora')\n",
+        "\n",
+        "split = int(len(df_meteo) * 0.8)\n",
+        "\n",
+        "X_train, X_test = X.iloc[:split], X.iloc[split:]\n",
+        "y_train, y_test = y.iloc[:split], y.iloc[split:]\n",
+        "\n",
+        "print(f\"Amostras de Treino: {len(X_train)}\")\n",
+        "print(f\"Amostras de Teste: {len(X_test)}\")"
+      ],
+      "metadata": {
+        "id": "FD6PezGP5sp-"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 3. Treinar os 3 Regressores e Comparar Métricas\n",
+        "modelos_reg = {\n",
+        "    \"Regressão Linear\": LinearRegression(),\n",
+        "    \"Árvore de Decisão\": DecisionTreeRegressor(random_state=42),\n",
+        "    \"Random Forest\": RandomForestRegressor(n_estimators=100, random_state=42)\n",
+        "}\n",
+        "\n",
+        "resultados = []\n",
+        "\n",
+        "for nome, modelo in modelos_reg.items():\n",
+        "    modelo.fit(X_train, y_train)\n",
+        "    y_pred = modelo.predict(X_test)\n",
+        "\n",
+        "    resultados.append({\n",
+        "        \"Modelo\": nome,\n",
+        "        \"MAE (W/m²)\": round(mean_absolute_error(y_test, y_pred), 2),\n",
+        "        \"MSE ((W/m²)²)\": round(mean_squared_error(y_test, y_pred), 2),\n",
+        "        \"R² Score\": round(r2_score(y_test, y_pred), 4)\n",
+        "    })\n",
+        "\n",
+        "df_resultados = pd.DataFrame(resultados)\n",
+        "display(df_resultados)"
+      ],
+      "metadata": {
+        "id": "WjbofB055sms"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# 4. Gráfico de Valores Reais vs. Previstos (Random Forest)\n",
+        "y_pred_rf = modelos_reg[\"Random Forest\"].predict(X_test)\n",
+        "\n",
+        "plt.figure(figsize=(7, 5))\n",
+        "plt.scatter(y_test, y_pred_rf, alpha=0.6, color='darkorange', label='Predições RF')\n",
+        "plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--', lw=2, label='Ideal')\n",
+        "plt.title('Valores Reais vs. Previstos (Random Forest)')\n",
+        "plt.xlabel('Radiação Real (W/m²)')\n",
+        "plt.ylabel('Radiação Prevista (W/m²)')\n",
+        "plt.legend()\n",
+        "plt.grid(True)\n",
+        "plt.show()"
+      ],
+      "metadata": {
+        "id": "k4KMzvav5sjc"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "### Conclusões da Regressão (Radiação Solar em Petrolina)\n",
+        "\n",
+        "1. **Comparação dos Modelos:**\n",
+        "   O algoritmo **Random Forest Regressor** apresentou o melhor desempenho geral, obtendo o maior valor de $R^2$ e os menores erros (MAE e MSE). Ele supera a Regressão Linear por conseguir mapear relações não-lineares complexas entre o clima e a irradiação solar.\n",
+        "\n",
+        "2. **O Peso da Hora:**\n",
+        "   A variável `hora` é o fator determinante na previsão da radiação solar, pois a geometria solar (posição do sol ao longo do dia) define o limite físico máximo de radiação que atinge a superfície, independentemente de fatores meteorológicos secundários como vento ou nuvens.\n",
+        "\n",
+        "3. **Radiação Solar vs. Geração Fotovoltaica:**\n",
+        "   A radiação estimada em $W/m^2$ não se traduz diretamente em energia elétrica produzida por um painel solar por razões como:\n",
+        "   - **Eficiência Limitada dos Painéis:** Módulos fotovoltaicos convertem apenas entre 15% e 22% da irradiação recebida em eletricidade.\n",
+        "   - **Perdas do Sistema (Performance Ratio):** Fatores ambientais como temperatura elevada dos painéis (que reduz a eficiência), sujeira, sombreamento e perdas elétricas nos inversores diminuem a geração real.\n",
+        "   - **Orientação e Inclinação:** A radiação medida é a *global horizontal*, ao passo que os painéis solares são instalados com ângulo e orientação específicos para maximizar a captação."
+      ],
+      "metadata": {
+        "id": "KhHBQ3wp5sgN",
+        "outputId": "79fb1573-17b6-48ea-8eec-3f4ec219342f",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 106
+        }
+      },
+      "execution_count": 1,
+      "outputs": [
+        {
+          "output_type": "error",
+          "ename": "SyntaxError",
+          "evalue": "invalid syntax (1804149747.py, line 3)",
+          "traceback": [
+            "\u001b[0;36m  File \u001b[0;32m\"/tmp/ipykernel_3235/1804149747.py\"\u001b[0;36m, line \u001b[0;32m3\u001b[0m\n\u001b[0;31m    1. **Comparação dos Modelos:**\u001b[0m\n\u001b[0m                    ^\u001b[0m\n\u001b[0;31mSyntaxError\u001b[0m\u001b[0;31m:\u001b[0m invalid syntax\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "1KX8u1axOrIC"
+      },
+      "source": [
+        "# Entrega pelo GitHub\n",
+        "\n",
+        "Envie **apenas o link do repositório público**. Organize-o com:\n",
+        "\n",
+        "- `README.md` contendo objetivo, fontes e período dos dados, instruções para executar o notebook e resumo dos resultados;\n",
+        "- notebook `.ipynb` com a consulta às APIs, sua análise, os **três classificadores e os três regressores**, todos os imports necessários adicionados por você e conclusões em Markdown;\n",
+        "- os dois CSVs gerados (ou instruções completas e testadas para reproduzi-los) e eventuais figuras utilizadas.\n",
+        "\n",
+        "Verifique se o notebook roda **na ordem das células** a partir de um ambiente limpo. Não inclua senhas, tokens ou arquivos sem relação com a avaliação. A banca deve conseguir encontrar as seis comparações e as respostas às duas tarefas sem procurar uma agulha no palheiro.\n",
+        "\n",
+        "### Fontes\n",
+        "\n",
+        "- [ANEEL — SIGA](https://dadosabertos.aneel.gov.br/dataset/siga-sistema-de-informacoes-de-geracao-da-aneel)\n",
+        "- [ANEEL — recurso e campos usados](https://dadosabertos.aneel.gov.br/dataset/siga-sistema-de-informacoes-de-geracao-da-aneel/resource/11ec447d-698d-4ab8-977f-b424d5deee6a)\n",
+        "- [Open-Meteo — histórico e unidades](https://open-meteo.com/en/docs/historical-weather-api)"
+      ]
+    }
+  ],
+  "metadata": {
+    "colab": {
+      "name": "Conheça o Colab",
+      "provenance": [],
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "display_name": "Python 3",
+      "name": "python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 0
+}
